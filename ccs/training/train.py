@@ -39,8 +39,8 @@ class Elicit(Run):
     def default():
         return Elicit(
             data=Extract(
-                model="<placeholder>",
-                datasets=("<placeholder>",),
+                model="microsoft/deberta-v2-xxlarge-mnli",
+                datasets=("imdb",),
             )
         )
 

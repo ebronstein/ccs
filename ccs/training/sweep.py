@@ -6,6 +6,7 @@ from datasets import get_dataset_config_info
 from transformers import AutoConfig
 
 from ..evaluation import Eval
+from ..extraction.extraction import Extract, get_layers_for_layer_stride, get_num_hidden_layers
 from ..files import memorably_named_dir, sweeps_dir
 from ..plotting.visualize import visualize_sweep
 from ..training.eigen_reporter import EigenFitterConfig
@@ -127,7 +128,10 @@ class Sweep:
                         out_dir = sweep_dir / model / dataset_str
 
                         data = replace(
-                            self.run_template.data, model=model, datasets=train_datasets
+                            self.run_template.data,
+                            model=model,
+                            datasets=train_datasets,
+                            layers=_get_updated_layers_for_model(model, self.run_template.data),
                         )
                         run = replace(self.run_template, data=data, out_dir=out_dir)
                         if var_weight is not None and neg_cov_weight is not None:
@@ -171,3 +175,12 @@ class Sweep:
 
         if self.visualize:
             visualize_sweep(sweep_dir)
+
+
+def _get_updated_layers_for_model(model: str, data: Extract) -> tuple[int, ...]:
+    layer_stride = data.layer_stride
+    if layer_stride > 1:
+        return get_layers_for_layer_stride(model, layer_stride)
+    else:
+        num_hidden_layers = get_num_hidden_layers(model)
+        return tuple(filter(lambda x: x <= num_hidden_layers, data.layers))

@@ -23,7 +23,7 @@ from datasets import (
 )
 from simple_parsing import Serializable, field
 from torch import Tensor
-from transformers import AutoConfig, PreTrainedModel
+from transformers import AutoConfig, PretrainedConfig, PreTrainedModel
 
 from ..promptsource import DatasetTemplates
 from ..utils import (
@@ -131,15 +131,7 @@ class Extract(Serializable):
                 "Cannot use both --layers and --layer-stride. Please use only one."
             )
         elif layer_stride > 1:
-            from transformers import AutoConfig, PretrainedConfig
-
-            # Look up the model config to get the number of layers
-            config = assert_type(
-                PretrainedConfig, AutoConfig.from_pretrained(self.model)
-            )
-            # Note that we always include 0 which is the embedding layer
-            layer_range = range(1, config.num_hidden_layers + 1, layer_stride)
-            self.layers = (0,) + tuple(layer_range)
+            self.layers = get_layers_for_layer_stride(self.model, layer_stride)
 
     def explode(self) -> list["Extract"]:
         """Explode this config into a list of configs, one for each layer."""
@@ -147,6 +139,19 @@ class Extract(Serializable):
             replace(self, datasets=(ds,), data_dirs=(data_dir,) if data_dir else ())
             for ds, data_dir in zip_longest(self.datasets, self.data_dirs)
         ]
+
+
+def get_num_hidden_layers(model: str) -> int:
+    """Return the number of hidden layers in a model."""
+    # Look up the model config to get the number of layers
+    return assert_type(
+        PretrainedConfig, AutoConfig.from_pretrained(model)).num_hidden_layers
+
+
+def get_layers_for_layer_stride(model: str, layer_stride: int) -> tuple[int, ...]:
+    # Note that we always include 0 which is the embedding layer
+    layer_range = range(1, get_num_hidden_layers(model) + 1, layer_stride)
+    return (0,) + tuple(layer_range)
 
 
 @torch.inference_mode()
@@ -303,7 +308,7 @@ def extract_hiddens(
                     # probs near 1 will be somewhat imprecise
                     # log(p/(1-p)) = log(p) - log(1-p) = logp - log(1 - exp(logp))
                     lm_log_odds[i, j] = logprob - torch.log1p(-logprob.exp())
-                    
+
                 hiddens = (
                     outputs.get("decoder_hidden_states") or outputs["hidden_states"]
                 )
