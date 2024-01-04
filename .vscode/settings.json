@@ -11,7 +11,7 @@
     "python.testing.unittestEnabled": false,
     "[python]": {
         "editor.codeActionsOnSave": {
-            "source.organizeImports": false
+            "source.organizeImports": "never"
         },
     },
 }
