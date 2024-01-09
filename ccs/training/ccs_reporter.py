@@ -44,6 +44,9 @@ class CcsConfig(FitterConfig):
     """
     loss_dict: dict[str, float] = field(default_factory=dict, init=False)
     norm: Literal["leace", "burns", "meanonly"] = "meanonly"
+    """The normalization scheme to use for the hidden states.
+    "leace" uses `LeaceFitter`. "burns" subtracts the mean and divides by the standard
+    deviation. "meanonly" subtracts the mean only. Defaults to "meanonly"."""
     num_layers: int = 1
     """The number of layers in the MLP."""
     pre_ln: bool = False
