@@ -149,6 +149,9 @@ class Sweep:
                         except torch.linalg.LinAlgError as e:
                             print(colorize(f"LinAlgError: {e}", "red"))
                             continue
+                        except Exception as e:
+                            print(colorize(f"{type(e)}: {e}", "red"))
+                            continue
 
                         if not self.skip_transfer_eval:
                             if len(eval_datasets) > 1:
