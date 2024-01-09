@@ -257,11 +257,10 @@ class ModelVisualization:
         """
         df = self.df
         model_name = self.model_name
-        layer_min, layer_max = df["layer"].min(), df["layer"].max()
         model_path = sweep.path / model_name
         model_path.mkdir(parents=True, exist_ok=True)
         if self.is_transfer:
-            for layer in range(layer_min, layer_max + 1):
+            for layer in sorted(df["layer"].unique()):
                 filtered = df[(df["layer"] == layer) & (df["ensembling"] == ensembling)]
                 fig = TransferEvalHeatmap(
                     layer, score_type=score_type, ensembling=ensembling
@@ -316,7 +315,7 @@ class SweepVisualization:
                 raise Exception(f"expected {model_repo} to be a directory")
 
             # TODO: Use a more robust heuristic
-            if model_repo.name.startswith("gpt2"):
+            if model_repo.name.startswith("gpt2") or model_repo.name.startswith("roberta"):
                 folders += [model_repo]
             else:
                 folders += [p for p in model_repo.iterdir() if p.is_dir()]
