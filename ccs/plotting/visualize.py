@@ -216,14 +216,18 @@ class ModelVisualization:
         model_name = model_path.name
         is_transfer = False
 
+        def is_valid_eval_dir(path):
+            return (path / "eval.csv").exists()
+
         def get_eval_dirs(model_path):
             # toplevel is either repo/dataset or dataset
             for toplevel in model_path.iterdir():
-                if (toplevel / "eval.csv").exists():
+                if is_valid_eval_dir(toplevel):
                     yield toplevel
                 else:
                     for eval_dir in toplevel.iterdir():
-                        yield eval_dir
+                        if is_valid_eval_dir(eval_dir):
+                            yield eval_dir
 
         for train_dir in get_eval_dirs(model_path):
             eval_df = cls._read_eval_csv(train_dir, train_dir.name, train_dir.name)

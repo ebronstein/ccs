@@ -11,6 +11,10 @@ from .calibration import CalibrationError, CalibrationEstimate
 from .roc_auc import RocAucResult, roc_auc_ci
 
 
+ENSEMBLING_MODES = ("none", "burns", "partial", "full")
+EnsemblingModesType = Literal["none", "burns", "partial", "full"]
+
+
 @dataclass(frozen=True)
 class EvalResult:
     """The result of evaluating a classifier."""
@@ -50,8 +54,27 @@ class EvalResult:
         }
 
 
+def _inverse_sigmoid(x: Tensor) -> Tensor:
+    return torch.log(x / (1 - x))
+
+
+def _infer_logits(y_logits: Tensor, ensembling: EnsemblingModesType = "none") -> Tensor:
+    assert y_logits.shape[-1] == 2, "Logits must be binary."
+
+    if ensembling == "none":
+        return y_logits[..., 1]
+    elif ensembling in ("partial", "full"):
+        return y_logits[..., 1] - y_logits[..., 0]
+    elif ensembling == "burns":
+        y_probs = torch.sigmoid(y_logits)
+        y_pred_prob = (1 - y_probs[..., 0] + y_probs[..., 1]) / 2
+        return _inverse_sigmoid(y_pred_prob)
+    else:
+        raise ValueError(f"Unknown mode: {ensembling}")
+
+
 def get_logprobs(
-    y_logits: Tensor, ensembling: Literal["none", "partial", "full"] = "none"
+    y_logits: Tensor, ensembling: EnsemblingModesType = "none"
 ) -> Tensor:
     """
     Get the class probabilities from a tensor of logits.
@@ -61,22 +84,15 @@ def get_logprobs(
         Tensor of logprobs: If ensemble is "none" or "partial", tensor of shape (n, v).
             If ensemble is "full", tensor of shape (n,).
     """
-    assert y_logits.shape[-1] == 2, "Logits must be binary."
     if ensembling == "full":
         y_logits = y_logits.mean(dim=1)
-
-    y_logits = (
-        y_logits[..., 1]
-        if ensembling == "none"
-        else y_logits[..., 1] - y_logits[..., 0]
-    )
-    return F.logsigmoid(y_logits)
+    return F.logsigmoid(_infer_logits(y_logits, ensembling))
 
 
 def evaluate_preds(
     y_true: Tensor,
     y_logits: Tensor,
-    ensembling: Literal["none", "partial", "full"] = "none",
+    ensembling: EnsemblingModesType = "none",
 ) -> EvalResult:
     """
     Evaluate the performance of a classification model.
@@ -92,25 +108,33 @@ def evaluate_preds(
     assert y_true.shape == (n,)
 
     if ensembling == "full":
-        y_logits = y_logits.mean(dim=1)
+        y_logits = y_logits.mean(dim=1) # (N, n_classes)
     else:
         y_true = repeat(y_true, "n -> n v", v=v)
 
-    THRESHOLD = 0.5
-    if ensembling == "none":
-        y_pred = y_logits[..., 1].gt(THRESHOLD).to(torch.int)
-    else:
-        y_pred = y_logits.argmax(dim=-1)
+    # Predict logits using the given ensembling mode.
+    y_pred_logits = _infer_logits(y_logits, ensembling)
+    y_pred = y_pred_logits.gt(0).to(torch.int)
 
     acc = accuracy_ci(y_true, y_pred)
 
     if ensembling == "none":
-        auroc = roc_auc_ci(to_one_hot(y_true, c).long().flatten(1), y_logits.flatten(1))
-    elif ensembling in ("partial", "full"):
+        # y_true has shape (N, variants).
+        # to_one_hot(y_true, c) has shape (N, variants, n_classes).
+        # Both are flattened to (N, variants * n_classes).
+        auroc = roc_auc_ci(
+            to_one_hot(y_true, c).long().flatten(1), y_logits.flatten(1))
+    elif ensembling in ("burns", "partial", "full"):
         # Pool together the negative and positive class logits
         if c == 2:
-            auroc = roc_auc_ci(y_true, y_logits[..., 1] - y_logits[..., 0])
+            # Full ensembling: both inputs have shape (N,).
+            # Partial ensembling: both inputs have shape (N, variants).
+            # Burns ensembling: both inputs have shape (N, variants).
+            auroc = roc_auc_ci(y_true, y_pred_logits)
         else:
+            if ensembling == "burns":
+                raise ValueError(
+                    "Burns ensembling is only supported for binary classification.")
             auroc = roc_auc_ci(to_one_hot(y_true, c).long(), y_logits)
     else:
         raise ValueError(f"Unknown mode: {ensembling}")
@@ -120,12 +144,7 @@ def evaluate_preds(
     cal_thresh = None
 
     if c == 2:
-        pooled_logits = (
-            y_logits[..., 1]
-            if ensembling == "none"
-            else y_logits[..., 1] - y_logits[..., 0]
-        )
-        pos_probs = torch.sigmoid(pooled_logits)
+        pos_probs = torch.sigmoid(y_pred_logits)
 
         # Calibrated accuracy
         cal_thresh = pos_probs.float().quantile(y_true.float().mean()).item()

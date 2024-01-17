@@ -12,7 +12,7 @@ from simple_parsing import subgroups
 from simple_parsing.helpers.serialization import save
 
 from ..extraction import Extract
-from ..metrics import evaluate_preds, get_logprobs, to_one_hot
+from ..metrics import ENSEMBLING_MODES, evaluate_preds, get_logprobs, to_one_hot
 from ..run import Run
 from ..training.supervised import train_supervised
 from ..utils.typing import assert_type
@@ -34,6 +34,12 @@ class Elicit(Run):
     """Whether to train a supervised classifier, and if so, whether to use
     cross-validation. Defaults to "single", which means to train a single classifier
     on the training data. "cv" means to use cross-validation."""
+
+    platt_scale: bool = True
+    """Whether to apply Platt scaling to the reporter's output. Platt scaling
+    trains a logistic regression model on the reporter's output scores to
+    calibrate them. Note that it uses the ground-truth labels, so it is a
+    supervised method. Defaults to True."""
 
     @staticmethod
     def default():
@@ -92,8 +98,9 @@ class Elicit(Run):
 
             reporter = CcsReporter(self.net, d, device=device, num_variants=v)
             train_loss = reporter.fit(first_train_data.hiddens)
-            labels = repeat(to_one_hot(first_train_data.labels, k), "n k -> n v k", v=v)
-            reporter.platt_scale(labels, first_train_data.hiddens)
+            if self.platt_scale:
+                labels = repeat(to_one_hot(first_train_data.labels, k), "n k -> n v k", v=v)
+                reporter.platt_scale(labels, first_train_data.hiddens)
 
         elif isinstance(self.net, EigenFitterConfig):
             fitter = EigenFitter(
@@ -157,20 +164,20 @@ class Elicit(Run):
                         reporter=dict(),
                     )
 
-                val_credences = reporter(val.hiddens)
-                train_credences = reporter(train.hiddens)
-                for mode in ("none", "partial", "full"):
+                reporter_val_credences = reporter(val.hiddens)
+                reporter_train_credences = reporter(train.hiddens)
+                for mode in ENSEMBLING_MODES:
                     row_bufs["eval"].append(
                         {
                             **meta,
                             "ensembling": mode,
-                            **evaluate_preds(val.labels, val_credences, mode).to_dict(),
+                            **evaluate_preds(val.labels, reporter_val_credences, mode).to_dict(),
                             "train_loss": train_loss,
                         }
                     )
                     if self.save_logprobs:
                         out_logprobs[ds_name]["reporter"][mode] = get_logprobs(
-                            val_credences, mode
+                            reporter_val_credences, mode
                         ).cpu()
 
                     row_bufs["train_eval"].append(
@@ -178,7 +185,7 @@ class Elicit(Run):
                             **meta,
                             "ensembling": mode,
                             **evaluate_preds(
-                                train.labels, train_credences, mode
+                                train.labels, reporter_train_credences, mode
                             ).to_dict(),
                             "train_loss": train_loss,
                         }
@@ -215,12 +222,12 @@ class Elicit(Run):
 
                     for i, model in enumerate(lr_models):
                         model.eval()
-                        val_credences = model(val.hiddens)
-                        train_credences = model(train.hiddens)
+                        lr_val_credences = model(val.hiddens)
+                        lr_train_credences = model(train.hiddens)
 
                         if self.save_logprobs:
                             out_logprobs[ds_name]["lr"][mode][i] = get_logprobs(
-                                val_credences, mode
+                                lr_val_credences, mode
                             ).cpu()
                         row_bufs["lr_eval"].append(
                             {
@@ -228,7 +235,7 @@ class Elicit(Run):
                                 "ensembling": mode,
                                 "inlp_iter": i,
                                 **evaluate_preds(
-                                    val.labels, val_credences, mode
+                                    val.labels, lr_val_credences, mode
                                 ).to_dict(),
                             }
                         )
@@ -238,7 +245,7 @@ class Elicit(Run):
                                 "ensembling": mode,
                                 "inlp_iter": i,
                                 **evaluate_preds(
-                                    train.labels, train_credences, mode
+                                    train.labels, lr_train_credences, mode
                                 ).to_dict(),
                             }
                         )

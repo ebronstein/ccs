@@ -7,7 +7,7 @@ import torch
 from simple_parsing.helpers import field
 
 from ..files import ccs_reporter_dir
-from ..metrics import evaluate_preds, get_logprobs
+from ..metrics import ENSEMBLING_MODES, evaluate_preds, get_logprobs
 from ..run import Run
 from ..utils import Color
 
@@ -56,20 +56,20 @@ class Eval(Run):
                     reporter=dict(),
                 )
 
-            val_credences = reporter(val_data.hiddens)
-            for mode in ("none", "partial", "full"):
+            reporter_val_credences = reporter(val_data.hiddens)
+            for mode in ENSEMBLING_MODES:
                 row_bufs["eval"].append(
                     {
                         **meta,
                         "ensembling": mode,
                         **evaluate_preds(
-                            val_data.labels, val_credences, mode
+                            val_data.labels, reporter_val_credences, mode
                         ).to_dict(),
                     }
                 )
                 if self.save_logprobs:
                     out_logprobs[ds_name]["reporter"][mode] = (
-                        get_logprobs(val_credences, mode).detach().cpu()
+                        get_logprobs(reporter_val_credences, mode).detach().cpu()
                     )
 
                 if val_data.lm_preds is not None:
@@ -99,10 +99,10 @@ class Eval(Run):
 
                     for i, model in enumerate(lr_models):
                         model.eval()
-                        val_credences = model(val_data.hiddens)
+                        lr_val_credences = model(val_data.hiddens)
                         if self.save_logprobs:
                             out_logprobs[ds_name]["lr"][mode][i] = get_logprobs(
-                                val_credences, mode
+                                lr_val_credences, mode
                             ).cpu()
                         row_bufs["lr_eval"].append(
                             {
@@ -110,7 +110,7 @@ class Eval(Run):
                                 "inlp_iter": i,
                                 **meta,
                                 **evaluate_preds(
-                                    val_data.labels, val_credences, mode
+                                    val_data.labels, lr_val_credences, mode
                                 ).to_dict(),
                             }
                         )
