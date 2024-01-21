@@ -273,11 +273,9 @@ def extract_hiddens(
 
                     # the Llama tokenizer splits off leading spaces
                     if tokenizer.decode(a_id[0]).strip() == "":
-                        a_id_without_space = tokenizer.encode(
-                            choice, add_special_tokens=False
+                        a_id = tokenizer.encode(
+                            choice["answer"], add_special_tokens=False
                         )
-                        assert a_id_without_space == a_id[1:]
-                        a_id = a_id_without_space
 
                     answer = torch.tensor([a_id], device=device)
                     labels = (
